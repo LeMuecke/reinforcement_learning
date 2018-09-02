@@ -14,7 +14,7 @@ class DQN():
     def __init__(self, state_size, action_size):
         self.state_size = state_size
         self.action_size = action_size
-        self.memory = deque(maxlen=1000)
+        self.memory = deque(maxlen=2000)
         self.gamma = 0.95    # discount rate
         self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.01
@@ -63,6 +63,17 @@ class DQN():
     def save(self, name):
         self.model.save_weights(name)
 
+def to_grayscale(img):
+    return np.mean(img, axis=2).astype(np.uint8)
+
+def downsample(img):
+    return img[::2, ::2]
+
+def preprocess(img):
+    return to_grayscale(downsample(img))
+
+def transform_reward(reward):
+    return np.sign(reward)
 
 def train(episodes):
     #env = gym.make('CartPole-v0')
@@ -70,7 +81,8 @@ def train(episodes):
     env = gym.make('BreakoutDeterministic-v4')
     #env = gym.make('BeamRider-v0')
     env._max_episode_steps = None
-    state_size = env.observation_space.shape
+    #state_size = env.observation_space.shape
+    state_size = preprocess(env.reset()).shape
     action_size = env.action_space.n
     agent = DQN(state_size, action_size)
 
@@ -80,7 +92,7 @@ def train(episodes):
     #agent.load("./save/cartpole.h5")
     try:
         for e in range(episodes):
-            state = env.reset()
+            state = preprocess(env.reset())
             new_state_size = list()
             new_state_size.append(1)
             for i in state_size:
@@ -89,14 +101,14 @@ def train(episodes):
 
             for time_t in range(10000):
                 # turn this on if you want to render
-                #env.render()
+                env.render()
                 # Decide action
                 action = agent.act(state)
                 # Advance the game to the next frame based on the action.
                 # Reward is 1 for every frame the pole survived
                 next_state, reward, done, _ = env.step(action)
-                #reward = reward if not done else -10
-                next_state = np.reshape(next_state, new_state_size)
+                reward = transform_reward(reward)
+                next_state = np.reshape(preprocess(next_state), new_state_size)
                 # Remember the previous state, action, reward, and done
                 agent.remember(state, action, reward, next_state, done)
                 # make next_state the new current state for the next frame.
