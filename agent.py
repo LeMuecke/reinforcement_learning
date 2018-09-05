@@ -9,18 +9,20 @@ import tensorflow as tf
 from tensorflow import keras
 import h5py
 
+
 class DQN():
 
     def __init__(self, state_size, action_size):
         self.state_size = state_size
         self.action_size = action_size
         self.memory = deque(maxlen=2000)
-        self.gamma = 0.95    # discount rate
+        self.gamma = 0.99    # discount rate
         self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.995
-        self.learning_rate = 0.001
-        self.model = self.q_approach2()
+        self.learning_rate = 0.00025
+        self.rho = 0.95
+        self.model = self.generate_model()
 
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
@@ -36,25 +38,44 @@ class DQN():
         for state, action, reward, next_state, done in minibatch:
             target = reward
             if not done:
+                states_to_be_predicted = state[1:]
+                states_to_be_predicted = np.append(states_to_be_predicted, next_state) #TODO: BUG: append doesn't work as expected
                 target = reward + self.gamma * \
-                       np.amax(self.model.predict(next_state)[0])
+                       np.amax(self.model.predict(np.array(states_to_be_predicted))[0]) #TODO: BUG: states_to_be_predicted still in wrong shape
             target_f = self.model.predict(state)
             target_f[0][action] = target
             self.model.fit(state, target_f, epochs=1, verbose=0)
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-    def q_approach2(self):
+    # def fit_batch(self):
+    #
+    #     next_q_values = self.model.predict([next_states, np.ones(actions.shape)])
+    #
+    #     next_q_values[is_terminal] = 0
+    #
+    #     q_values = rewards + self.gamma + np.max(next_Q_values, axis=1)
+    #
+    #     self.model.fit([start_states, actions], actions * Q_values[:, None], nb_epoch=1, batch_size=len(start_states), verbose = 0)
 
-        model = keras.Sequential()
-        model.add(keras.layers.Flatten(input_shape=self.state_size))
-        #model.add(keras.layers.Dense(128, activation="relu"))
-        model.add(keras.layers.Dense(24, activation="relu"))
-        model.add(keras.layers.Dense(24, activation="relu"))
-        model.add(keras.layers.Dense(self.action_size, activation="linear"))
+    def generate_model(self):
 
-        model.compile(loss="mse", optimizer=keras.optimizers.Adam(lr=self.learning_rate))
+        input_layer = keras.layers.Input(self.state_size, name='input_frames')
 
+        normalized = keras.layers.Lambda(lambda x: x / 255.0)(input_layer)
+
+        conv_layer_1 = keras.layers.Conv2D(16, 8, 8, activation="relu", data_format="channels_first")(normalized)
+        conv_layer_2 = keras.layers.Conv2D(32, 4, 4, activation="relu")(conv_layer_1)
+
+        conv_flattened = keras.layers.Flatten()(conv_layer_2)
+
+        hidden = keras.layers.Dense(256, activation="relu")(conv_flattened)
+
+        output = keras.layers.Dense(self.action_size)(hidden)
+
+        model = keras.models.Model(inputs=input_layer, outputs=output)
+        optimizer = keras.optimizers.RMSprop(lr=self.learning_rate, rho=self.rho, epsilon=self.epsilon)
+        model.compile(optimizer, loss='mse')
         return model
 
     def load(self, name):
@@ -78,41 +99,56 @@ def transform_reward(reward):
 def train(episodes):
     #env = gym.make('CartPole-v0')
     #env = gym.make('Breakout-v0')
-    env = gym.make('BreakoutDeterministic-v4')
     #env = gym.make('BeamRider-v0')
+    env = gym.make('BreakoutDeterministic-v0')
+
     env._max_episode_steps = None
-    #state_size = env.observation_space.shape
-    state_size = preprocess(env.reset()).shape
+    state_size = (4,) + preprocess(env.reset()).shape
     action_size = env.action_space.n
     agent = DQN(state_size, action_size)
 
     done = False
-    batch_size = 32
+    batch_size = 16
 
-    #agent.load("./save/cartpole.h5")
+    #agent.load("./save/breakoutDeterministicV4.h5")
     try:
         for e in range(episodes):
             state = preprocess(env.reset())
-            new_state_size = list()
-            new_state_size.append(1)
-            for i in state_size:
-                new_state_size.append(i)
-            state = np.reshape(state, new_state_size)
+            #state = np.reshape(state, state_size)
+            action = None
 
-            for time_t in range(10000):
-                # turn this on if you want to render
+            for time_t in range(100000):
+
+                frame_collector = list()
+                reward_collector = list()
+                if time_t == 0:
+                    frame_collector.append(state)
+                else:
+                    action = agent.act(state)
+                    next_state, reward, done, _ = env.step(action)
+                    reward = transform_reward(reward)
+
+                    agent.remember(state, action, reward, preprocess(next_state), done)
+
+                    frame_collector.append(preprocess(next_state))
+                for frame in range(3):
+                    next_state, reward, done, _ = env.step(0)
+                    frame_collector.append(preprocess(next_state))
+                    reward_collector.append(transform_reward(reward))
+
+                state = np.array(frame_collector)
+
                 env.render()
                 # Decide action
-                action = agent.act(state)
+
                 # Advance the game to the next frame based on the action.
-                # Reward is 1 for every frame the pole survived
-                next_state, reward, done, _ = env.step(action)
-                reward = transform_reward(reward)
-                next_state = np.reshape(preprocess(next_state), new_state_size)
+
+
+                #next_state = np.reshape(preprocess(next_state), state_size)
                 # Remember the previous state, action, reward, and done
-                agent.remember(state, action, reward, next_state, done)
+
                 # make next_state the new current state for the next frame.
-                state = next_state
+                #state = next_state
                 # done becomes True when the game ends
                 # ex) The agent drops the pole
                 if done:
