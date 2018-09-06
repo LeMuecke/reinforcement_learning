@@ -47,6 +47,7 @@ class DQN():
 
                 target = reward + self.gamma * \
                        np.amax(self.model.predict(states_to_be_predicted)[0])
+            state = state.reshape(4,1,150,80)
             target_f = self.model.predict(state)
             target_f[0][action] = target
             self.model.fit(state, target_f, epochs=1, verbose=0)
