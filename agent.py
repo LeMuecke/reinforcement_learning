@@ -30,6 +30,7 @@ class DQN():
     def act(self, state):
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
+        state = state.reshape(4,1,105,80)
         act_values = self.model.predict(state)
         return np.argmax(act_values[0])  # returns action
 
