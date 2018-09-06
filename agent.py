@@ -39,9 +39,14 @@ class DQN():
             target = reward
             if not done:
                 states_to_be_predicted = state[1:]
-                states_to_be_predicted = np.append(states_to_be_predicted, next_state) #TODO: BUG: append doesn't work as expected
+                states_to_be_predicted = states_to_be_predicted.tolist()
+                states_to_be_predicted.append(next_state)
+                states_to_be_predicted = np.array(states_to_be_predicted)
+
+                states_to_be_predicted = states_to_be_predicted.reshape(4,1,105,80)
+
                 target = reward + self.gamma * \
-                       np.amax(self.model.predict(np.array(states_to_be_predicted))[0]) #TODO: BUG: states_to_be_predicted still in wrong shape
+                       np.amax(self.model.predict(states_to_be_predicted)[0])
             target_f = self.model.predict(state)
             target_f[0][action] = target
             self.model.fit(state, target_f, epochs=1, verbose=0)
@@ -60,7 +65,7 @@ class DQN():
 
     def generate_model(self):
 
-        input_layer = keras.layers.Input(self.state_size, name='input_frames')
+        input_layer = keras.layers.Input(shape=self.state_size, batch_size=4, name='input_frames')
 
         normalized = keras.layers.Lambda(lambda x: x / 255.0)(input_layer)
 
@@ -103,12 +108,12 @@ def train(episodes):
     env = gym.make('BreakoutDeterministic-v0')
 
     env._max_episode_steps = None
-    state_size = (4,) + preprocess(env.reset()).shape
+    state_size = (1,) + preprocess(env.reset()).shape
     action_size = env.action_space.n
     agent = DQN(state_size, action_size)
 
     done = False
-    batch_size = 16
+    batch_size = 32
 
     #agent.load("./save/breakoutDeterministicV4.h5")
     try:
