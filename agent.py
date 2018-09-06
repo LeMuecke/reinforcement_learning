@@ -1,11 +1,9 @@
 from collections import deque
 
 import gym
-import time
 import numpy as np
 import random
 
-import tensorflow as tf
 from tensorflow import keras
 import h5py
 
@@ -30,7 +28,7 @@ class DQN():
     def act(self, state):
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
-        state = state.reshape(4,1,105,80)
+        state = state.reshape(4, 1, 105, 80)
         act_values = self.model.predict(state)
         return np.argmax(act_values[0])  # returns action
 
@@ -44,26 +42,16 @@ class DQN():
                 states_to_be_predicted.append(next_state)
                 states_to_be_predicted = np.array(states_to_be_predicted)
 
-                states_to_be_predicted = states_to_be_predicted.reshape(4,1,105,80)
+                states_to_be_predicted = states_to_be_predicted.reshape(4, 1, 105, 80)
 
                 target = reward + self.gamma * \
                        np.amax(self.model.predict(states_to_be_predicted)[0])
-            state = state.reshape(4,1,105,80)
+            state = state.reshape(4, 1, 105, 80)
             target_f = self.model.predict(state)
             target_f[0][action] = target
             self.model.fit(state, target_f, epochs=1, verbose=0)
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
-
-    # def fit_batch(self):
-    #
-    #     next_q_values = self.model.predict([next_states, np.ones(actions.shape)])
-    #
-    #     next_q_values[is_terminal] = 0
-    #
-    #     q_values = rewards + self.gamma + np.max(next_Q_values, axis=1)
-    #
-    #     self.model.fit([start_states, actions], actions * Q_values[:, None], nb_epoch=1, batch_size=len(start_states), verbose = 0)
 
     def generate_model(self):
 
@@ -94,14 +82,18 @@ class DQN():
 def to_grayscale(img):
     return np.mean(img, axis=2).astype(np.uint8)
 
+
 def downsample(img):
     return img[::2, ::2]
+
 
 def preprocess(img):
     return to_grayscale(downsample(img))
 
+
 def transform_reward(reward):
     return np.sign(reward)
+
 
 def train(episodes):
     #env = gym.make('CartPole-v0')
@@ -117,11 +109,10 @@ def train(episodes):
     done = False
     batch_size = 32
 
-    #agent.load("./save/breakoutDeterministicV4.h5")
+    #agent.load("./breakoutDeterministicV4.h5")
     try:
         for e in range(episodes):
             state = preprocess(env.reset())
-            #state = np.reshape(state, state_size)
             action = None
 
             for time_t in range(100000):
@@ -145,19 +136,8 @@ def train(episodes):
 
                 state = np.array(frame_collector)
 
-                env.render()
-                # Decide action
+                #env.render()
 
-                # Advance the game to the next frame based on the action.
-
-
-                #next_state = np.reshape(preprocess(next_state), state_size)
-                # Remember the previous state, action, reward, and done
-
-                # make next_state the new current state for the next frame.
-                #state = next_state
-                # done becomes True when the game ends
-                # ex) The agent drops the pole
                 if done:
                     # print the score and break out of the loop
                     print("episode: {}/{}, score: {}"
@@ -165,15 +145,13 @@ def train(episodes):
                     break
                 if len(agent.memory) > batch_size:
                     agent.replay(batch_size)
-            # train the agent with the experience of the episode
-            #agent.replay(batch_size)
 
-        agent.save("./save/breakoutDeterministicV4.h5")
+        agent.save("./breakoutDeterministicV4.h5")
     except KeyboardInterrupt:
-        agent.save("./save/breakoutDeterministicV4.h5")
+        agent.save("./breakoutDeterministicV4.h5")
 
 
-train(2000)
+train(50000)
 
 # for i_episode in range(20):
 #     observation = env.reset()
