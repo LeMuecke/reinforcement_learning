@@ -2,6 +2,7 @@ from collections import deque
 
 import gym
 import numpy as np
+import time
 import random
 
 from tensorflow import keras
@@ -33,6 +34,8 @@ class DQN():
         return np.argmax(act_values[0])  # returns action
 
     def replay(self, batch_size):
+        replay_start_t = int(round(time.time() * 1000))
+        replay_fit_sum_t = 0
         minibatch = random.sample(self.memory, batch_size)
         for state, action, reward, next_state, done in minibatch:
             target = reward
@@ -49,9 +52,13 @@ class DQN():
             state = state.reshape(4, 1, 105, 80)
             target_f = self.model.predict(state)
             target_f[0][action] = target
+            replay_fit_t = int(round(time.time() * 1000))
             self.model.fit(state, target_f, epochs=1, verbose=0)
+            replay_fit_sum_t += int(round(time.time() * 1000)) - replay_fit_t
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+
+        print("Replay took " + str(int(round(time.time() * 1000)) - replay_start_t) + " while fit took " + str(replay_fit_sum_t))
 
     def generate_model(self):
 
@@ -99,7 +106,7 @@ def train(episodes):
     #env = gym.make('CartPole-v0')
     #env = gym.make('Breakout-v0')
     #env = gym.make('BeamRider-v0')
-    env = gym.make('BreakoutDeterministic-v0')
+    env = gym.make('BreakoutDeterministic-v4')
 
     env._max_episode_steps = None
     state_size = (1,) + preprocess(env.reset()).shape
@@ -112,6 +119,7 @@ def train(episodes):
     #agent.load("./breakoutDeterministicV4.h5")
     try:
         for e in range(episodes):
+            episode_start_t = int(round(time.time() * 1000))
             state = preprocess(env.reset())
             action = None
 
@@ -146,22 +154,11 @@ def train(episodes):
                 if len(agent.memory) > batch_size:
                     agent.replay(batch_size)
 
+            print("Episode took " + str(int(round(time.time() * 1000)) - episode_start_t))
+
         agent.save("./breakoutDeterministicV4.h5")
     except KeyboardInterrupt:
         agent.save("./breakoutDeterministicV4.h5")
 
 
 train(50000)
-
-# for i_episode in range(20):
-#     observation = env.reset()
-#
-#     for t in range(100):
-#         env.render()
-#         print(observation)
-#         action = env.action_space.sample()
-#         observation, reward, done, info = env.step(action)
-#         time.sleep(0.033)
-#         if done:
-#             print("Episode finished after {} timesteps".format(t+1))
-#             break
