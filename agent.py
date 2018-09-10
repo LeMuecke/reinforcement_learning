@@ -4,7 +4,9 @@ import gym
 import numpy as np
 import time
 import random
+from random_batch_deque import RandomBatchDeque
 
+import tensorflow as tf
 from tensorflow import keras
 import h5py
 
@@ -12,6 +14,7 @@ import h5py
 class DQN():
 
     def __init__(self, state_size, action_size):
+        self.sess = tf.Session()
         self.state_size = state_size
         self.action_size = action_size
         self.memory = deque(maxlen=2000)
@@ -22,6 +25,7 @@ class DQN():
         self.learning_rate = 0.00025
         self.rho = 0.95
         self.model = self.generate_model()
+        self.queue = RandomBatchDeque(capacity=2000, dtypes=np.uint8)
 
     def remember(self, state, action, reward, done):
         self.memory.append((state, action, reward, done))
@@ -29,24 +33,25 @@ class DQN():
     def act(self, state):
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
-        state = np.array(state)
-        state = state.reshape(4, 1, 105, 80)
+        state = tf.slice(state, [0, 0, 0, 0], [4, 1, 105, 80])
         act_values = self.model.predict(state)
         return np.argmax(act_values[0])  # returns action
 
     def replay(self, batch_size):
         replay_start_t = int(round(time.time() * 1000))
-        minibatch = random.sample(self.memory, batch_size)
+        #minibatch = random.sample(self.memory, batch_size)
+        minibatch = self.queue.dequeue(batch_size=batch_size)
 
         for state, action, reward, done in minibatch:
             target = reward
             if not done:
-                states_to_be_predicted = state[1:5].reshape(4, 1, 105, 80)
+                states_to_be_predicted = tf.slice(state, [1, 0, 0, 0], [5, 1, 105, 80])
+                #states_to_be_predicted = state[1:5].reshape(4, 1, 105, 80)
 
                 target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted)[0])
-            state_f = state[0:4].reshape(4, 1, 105, 80)
+            state_f = tf.slice(state, [0, 0, 0, 0], [4, 1, 105, 80])
             target_f = self.model.predict(state_f)
-            target_f[0][action] = target
+            target_f[0][action.eval(session=self.sess)] = target    #TODO: Has to be converted to tensor
             self.model.fit(state_f, target_f, epochs=1, verbose=0)
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
@@ -123,13 +128,16 @@ def train(episodes):
                 if time_t == 0:
                     frame_collector.append(state)
                 else:
-                    action = agent.act(state)
-                    next_state, reward, done, _ = env.step(action)
-                    reward = transform_reward(reward)
+                    action = tf.constant(agent.act(state), dtype=tf.int8)
+                    next_state, reward, done, _ = env.step(action.eval(session=agent.sess))
+                    reward = tf.constant(transform_reward(reward))
                     next_state = preprocess(next_state)
                     state.append(next_state)
 
-                    agent.remember(np.array(state), action, reward, done)
+                    #agent.remember(tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
+                    #               action, reward, tf.constant(done, dtype=tf.int8))
+                    agent.queue.enqueue((tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
+                                         action, reward, tf.constant(done, dtype=tf.int8)))
 
                     frame_collector.append(next_state)
                 for frame in range(3):
