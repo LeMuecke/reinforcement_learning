@@ -23,8 +23,8 @@ class DQN():
         self.rho = 0.95
         self.model = self.generate_model()
 
-    def remember(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done))
+    def remember(self, state, action, reward, done):
+        self.memory.append((state, action, reward, done))
 
     def act(self, state):
         if np.random.rand() <= self.epsilon:
@@ -36,21 +36,19 @@ class DQN():
 
     def replay(self, batch_size):
         replay_start_t = int(round(time.time() * 1000))
-        state, action, reward, next_state, done = random.sample(self.memory, 1)[0]
+        minibatch = random.sample(self.memory, batch_size)
 
-        target = reward
-        if not done:
-            states_to_be_predicted = state[1:]
-            states_to_be_predicted.append(next_state)
-            states_to_be_predicted = np.array(states_to_be_predicted)
-            states_to_be_predicted = states_to_be_predicted.reshape(4, 1, 105, 80)
+        for state, action, reward, done in minibatch:
+            target = reward
+            if not done:
+                states_to_be_predicted = np.array(state[1:5])
+                states_to_be_predicted = states_to_be_predicted.reshape(4, 1, 105, 80)
 
-            target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted)[0])
-        state = np.array(state)
-        state = state.reshape(4, 1, 105, 80)
-        target_f = self.model.predict(state)
-        target_f[0][action] = target
-        self.model.fit(state, target_f, epochs=1, verbose=0)
+                target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted)[0])
+            state_f = np.array(state[0:4]).reshape(4, 1, 105, 80)
+            target_f = self.model.predict(state_f)
+            target_f[0][action] = target
+            self.model.fit(state_f, target_f, epochs=1, verbose=0)
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
@@ -122,21 +120,23 @@ def train(episodes):
             for time_t in range(100000):
 
                 frame_collector = list()
-                reward_collector = list()
+                #reward_collector = list()
                 if time_t == 0:
                     frame_collector.append(state)
                 else:
                     action = agent.act(state)
                     next_state, reward, done, _ = env.step(action)
                     reward = transform_reward(reward)
+                    next_state = preprocess(next_state)
+                    state.append(next_state)
 
-                    agent.remember(state, action, reward, preprocess(next_state), done)
+                    agent.remember(state, action, reward, done)
 
-                    frame_collector.append(preprocess(next_state))
+                    frame_collector.append(next_state)
                 for frame in range(3):
-                    next_state, reward, done, _ = env.step(0)
+                    next_state, reward, done, _ = env.step(0)   #TODO: Check if 0 is really "not moving anywhere"
                     frame_collector.append(preprocess(next_state))
-                    reward_collector.append(transform_reward(reward))
+                    #reward_collector.append(transform_reward(reward))
 
                 state = frame_collector.copy()
 
