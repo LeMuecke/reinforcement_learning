@@ -41,11 +41,10 @@ class DQN():
         for state, action, reward, done in minibatch:
             target = reward
             if not done:
-                states_to_be_predicted = np.array(state[1:5])
-                states_to_be_predicted = states_to_be_predicted.reshape(4, 1, 105, 80)
+                states_to_be_predicted = state[1:5].reshape(4, 1, 105, 80)
 
                 target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted)[0])
-            state_f = np.array(state[0:4]).reshape(4, 1, 105, 80)
+            state_f = state[0:4].reshape(4, 1, 105, 80)
             target_f = self.model.predict(state_f)
             target_f[0][action] = target
             self.model.fit(state_f, target_f, epochs=1, verbose=0)
@@ -130,7 +129,7 @@ def train(episodes):
                     next_state = preprocess(next_state)
                     state.append(next_state)
 
-                    agent.remember(state, action, reward, done)
+                    agent.remember(np.array(state), action, reward, done)
 
                     frame_collector.append(next_state)
                 for frame in range(3):
