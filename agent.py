@@ -36,30 +36,25 @@ class DQN():
 
     def replay(self, batch_size):
         replay_start_t = int(round(time.time() * 1000))
-        replay_fit_sum_t = 0
-        minibatch = random.sample(self.memory, batch_size)
-        for state, action, reward, next_state, done in minibatch:
-            target = reward
-            if not done:
-                states_to_be_predicted = state[1:]
-                states_to_be_predicted.append(next_state)
-                states_to_be_predicted = np.array(states_to_be_predicted)
-                states_to_be_predicted = states_to_be_predicted.reshape(4, 1, 105, 80)
+        state, action, reward, next_state, done = random.sample(self.memory, 1)[0]
 
-                target = reward + self.gamma * \
-                       np.amax(self.model.predict(states_to_be_predicted)[0])
-            state = np.array(state)
-            state = state.reshape(4, 1, 105, 80)
-            target_f = self.model.predict(state)
-            target_f[0][action] = target
-            replay_fit_t = int(round(time.time() * 1000))
-            self.model.fit(state, target_f, epochs=1, verbose=0)
-            replay_fit_sum_t += int(round(time.time() * 1000)) - replay_fit_t
+        target = reward
+        if not done:
+            states_to_be_predicted = state[1:]
+            states_to_be_predicted.append(next_state)
+            states_to_be_predicted = np.array(states_to_be_predicted)
+            states_to_be_predicted = states_to_be_predicted.reshape(4, 1, 105, 80)
+
+            target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted)[0])
+        state = np.array(state)
+        state = state.reshape(4, 1, 105, 80)
+        target_f = self.model.predict(state)
+        target_f[0][action] = target
+        self.model.fit(state, target_f, epochs=1, verbose=0)
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-        print("Replay " + str(int(round(time.time() * 1000)) - replay_start_t) + ",fit " + str(replay_fit_sum_t) +
-              "||", end="", flush=True)
+        print("Replay " + str(int(round(time.time() * 1000)) - replay_start_t), end="", flush=True)
 
     def generate_model(self):
 
