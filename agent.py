@@ -25,7 +25,7 @@ class DQN():
         self.learning_rate = 0.00025
         self.rho = 0.95
         self.model = self.generate_model()
-        self.queue = RandomBatchDeque(capacity=2000, dtypes=np.uint8)
+        self.queue = tf.FIFOQueue(capacity=2000, dtypes=(tf.int8,tf.int8,tf.int8,tf.int8,tf.int8))
 
     def remember(self, state, action, reward, done):
         self.memory.append((state, action, reward, done))
@@ -39,16 +39,16 @@ class DQN():
 
     def replay(self, batch_size):
         replay_start_t = int(round(time.time() * 1000))
-        #minibatch = random.sample(self.memory, batch_size)
-        minibatch = self.queue.dequeue(batch_size=batch_size)
+        minibatch = random.sample(self.memory, batch_size)
+        #minibatch = self.queue.dequeue(batch_size=batch_size)
 
         for state, action, reward, done in minibatch:
             target = reward
-            if not done:
-                states_to_be_predicted = tf.slice(state, [1, 0, 0, 0], [5, 1, 105, 80])
+            if not done.eval(session=self.sess):
+                states_to_be_predicted = tf.slice(state, [1, 0, 0, 0], [4, 1, 105, 80])
                 #states_to_be_predicted = state[1:5].reshape(4, 1, 105, 80)
-
-                target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted)[0])
+                print(type(self.model.predict(states_to_be_predicted, steps=1)))
+                target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted, steps=1)[0])
             state_f = tf.slice(state, [0, 0, 0, 0], [4, 1, 105, 80])
             target_f = self.model.predict(state_f)
             target_f[0][action.eval(session=self.sess)] = target    #TODO: Has to be converted to tensor
@@ -134,10 +134,10 @@ def train(episodes):
                     next_state = preprocess(next_state)
                     state.append(next_state)
 
-                    #agent.remember(tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
-                    #               action, reward, tf.constant(done, dtype=tf.int8))
-                    agent.queue.enqueue((tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
-                                         action, reward, tf.constant(done, dtype=tf.int8)))
+                    agent.remember(tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
+                                   action, reward, tf.constant(done, dtype=tf.int8))
+                    #agent.queue.enqueue((tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
+                    #                     action, reward, tf.constant(done, dtype=tf.int8)))
 
                     frame_collector.append(next_state)
                 for frame in range(3):
