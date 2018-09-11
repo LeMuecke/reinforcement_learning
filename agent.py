@@ -47,12 +47,11 @@ class DQN():
             if not done.eval(session=self.sess):
                 states_to_be_predicted = tf.slice(state, [1, 0, 0, 0], [4, 1, 105, 80])
                 #states_to_be_predicted = state[1:5].reshape(4, 1, 105, 80)
-                print(type(self.model.predict(states_to_be_predicted, steps=1)))
                 target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted, steps=1)[0])
             state_f = tf.slice(state, [0, 0, 0, 0], [4, 1, 105, 80])
-            target_f = self.model.predict(state_f)
-            target_f[0][action.eval(session=self.sess)] = target    #TODO: Has to be converted to tensor
-            self.model.fit(state_f, target_f, epochs=1, verbose=0)
+            target_f = self.model.predict(state_f, steps=1)
+            target_f[0][action.eval(session=self.sess)] = target.eval(session=self.sess)    #TODO: Has to be converted to tensor
+            self.model.fit(state_f, target_f, epochs=1, verbose=0, steps_per_epoch=1)
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
