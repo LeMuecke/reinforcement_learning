@@ -25,7 +25,7 @@ class DQN():
         self.learning_rate = 0.00025
         self.rho = 0.95
         self.model = self.generate_model()
-        self.queue = tf.FIFOQueue(capacity=2000, dtypes=(tf.int8,tf.int8,tf.int8,tf.int8,tf.int8))
+        self.queue = tf.FIFOQueue(capacity=100, dtypes=(tf.int8, tf.int8))
 
     def remember(self, state, action, reward, done):
         self.memory.append((state, action, reward, done))
@@ -38,54 +38,67 @@ class DQN():
         return np.argmax(act_values[0])  # returns action
 
     def replay(self, batch_size):
+
+        merged = tf.summary.merge_all()
+        writer = tf.summary.FileWriter('.')
+        writer.add_graph(tf.get_default_graph())
+
         replay_start_t = int(round(time.time() * 1000))
         minibatch = random.sample(self.memory, batch_size)
+        print("Replay1:" + str(int(round(time.time() * 1000)) - replay_start_t), end=",", flush=True)
         #minibatch = self.queue.dequeue(batch_size=batch_size)
 
         for state, action, reward, done in minibatch:
             target = reward
-            print("Before fit1: " + str(int(round(time.time() * 1000)) - replay_start_t))
-            if not done.eval(session=self.sess):
+            print("Replay2:" + str(int(round(time.time() * 1000)) - replay_start_t), end=",", flush=True)
+            if not done:
                 states_to_be_predicted = tf.slice(state, [1, 0, 0, 0], [4, 105, 80, 1])
-                print("Before fit2: " + str(int(round(time.time() * 1000)) - replay_start_t))
+                print("Replay3:" + str(int(round(time.time() * 1000)) - replay_start_t), end=",", flush=True)
                 #states_to_be_predicted = state[1:5].reshape(4, 1, 105, 80)
                 target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted, steps=1)[0])
-                print("Before fit3: " + str(int(round(time.time() * 1000)) - replay_start_t))
+                print("Replay4:" + str(int(round(time.time() * 1000)) - replay_start_t), end=",", flush=True)
             state_f = tf.slice(state, [0, 0, 0, 0], [4, 105, 80, 1])
-            print("Before fit4: " + str(int(round(time.time() * 1000)) - replay_start_t))
+            print("Replay5:" + str(int(round(time.time() * 1000)) - replay_start_t), end=",", flush=True)
             target_f = self.model.predict(state_f, steps=1)
-            print("Before fit5: " + str(int(round(time.time() * 1000)) - replay_start_t))
-            target_f[0][action.eval(session=self.sess)] = target.eval(session=self.sess)    #TODO: Has to be converted to tensor
-            print("Before fit6: " + str(int(round(time.time() * 1000)) - replay_start_t))
+            print("Replay6:" + str(int(round(time.time() * 1000)) - replay_start_t), end=",", flush=True)
+            target_f[0][action] = target
+            print("Replay7:" + str(int(round(time.time() * 1000)) - replay_start_t), end=",", flush=True)
             target_f = tf.constant(target_f, dtype=tf.int8)
-            print("Before fit7: " + str(int(round(time.time() * 1000)) - replay_start_t))
-            self.model.fit(state_f, target_f, epochs=1, verbose=0, steps_per_epoch=1)
+            print("Replay8:" + str(int(round(time.time() * 1000)) - replay_start_t), end=",", flush=True)
+
+            self.queue.enqueue((state_f, target_f))
+            print("Replay9:" + str(int(round(time.time() * 1000)) - replay_start_t), end=",", flush=True)
+
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-        print("Replay " + str(int(round(time.time() * 1000)) - replay_start_t), end="", flush=True)
+        print("ReplayE:" + str(int(round(time.time() * 1000)) - replay_start_t), flush=True)
+
+    def replay_train(self):
+        state_f, target_f = self.queue.dequeue()
+        self.model.fit(state_f, target_f, epochs=1, verbose=0, steps_per_epoch=1)
 
     def generate_model(self):
 
-        input_layer = keras.layers.Input(shape=self.state_size, batch_size=4, name='input_frames')
+        with tf.name_scope('training_part'):
 
-        normalized = keras.layers.Lambda(lambda x: x / 255.0)(input_layer)
+            input_layer = keras.layers.Input(shape=self.state_size, batch_size=4, name='input_frames')
 
-        conv_layer_1 = keras.layers.Conv2D(16, 8, 8, activation="relu", data_format="channels_last")(normalized)
-        conv_layer_2 = keras.layers.Conv2D(32, 4, 4, activation="relu")(conv_layer_1)
+            normalized = keras.layers.Lambda(lambda x: x / 255.0)(input_layer)
 
-        conv_flattened = keras.layers.Flatten()(conv_layer_2)
+            conv_layer_1 = keras.layers.Conv2D(16, 8, 8, activation="relu", data_format="channels_last")(normalized)
+            conv_layer_2 = keras.layers.Conv2D(32, 4, 4, activation="relu")(conv_layer_1)
 
-        hidden = keras.layers.Dense(256, activation="relu")(conv_flattened)
+            conv_flattened = keras.layers.Flatten()(conv_layer_2)
 
-        output = keras.layers.Dense(self.action_size)(hidden)
+            hidden = keras.layers.Dense(256, activation="relu")(conv_flattened)
 
-        model = keras.models.Model(inputs=input_layer, outputs=output)
-        optimizer = keras.optimizers.RMSprop(lr=self.learning_rate, rho=self.rho, epsilon=self.epsilon)
+            output = keras.layers.Dense(self.action_size)(hidden)
+
+            model = keras.models.Model(inputs=input_layer, outputs=output)
+
+            optimizer = keras.optimizers.RMSprop(lr=self.learning_rate, rho=self.rho, epsilon=self.epsilon)
         model.compile(optimizer, loss='mse')
-
-        writer = tf.summary.FileWriter('.')
-        writer.add_graph(tf.get_default_graph())
 
         return model
 
@@ -139,14 +152,14 @@ def train(episodes):
                 if time_t == 0:
                     frame_collector.append(state)
                 else:
-                    action = tf.constant(agent.act(state), dtype=tf.int8)
-                    next_state, reward, done, _ = env.step(action.eval(session=agent.sess))
-                    reward = tf.constant(transform_reward(reward))
+                    action = agent.act(state)
+                    next_state, reward, done, _ = env.step(action)
+                    reward = transform_reward(reward)
                     next_state = preprocess(next_state)
                     state.append(next_state)
 
                     agent.remember(tf.constant(np.array(state).reshape(5, 105, 80, 1), dtype=tf.int8),
-                                   action, reward, tf.constant(done, dtype=tf.int8))
+                                   action, reward, done)
                     #agent.queue.enqueue((tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
                     #                     action, reward, tf.constant(done, dtype=tf.int8)))
 
