@@ -33,7 +33,7 @@ class DQN():
     def act(self, state):
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
-        state = tf.slice(state, [0, 0, 0, 0], [4, 1, 105, 80])
+        state = tf.slice(state, [0, 0, 0, 0], [4, 105, 80, 1])
         act_values = self.model.predict(state)
         return np.argmax(act_values[0])  # returns action
 
@@ -44,13 +44,21 @@ class DQN():
 
         for state, action, reward, done in minibatch:
             target = reward
+            print("Before fit1: " + str(int(round(time.time() * 1000)) - replay_start_t))
             if not done.eval(session=self.sess):
-                states_to_be_predicted = tf.slice(state, [1, 0, 0, 0], [4, 1, 105, 80])
+                states_to_be_predicted = tf.slice(state, [1, 0, 0, 0], [4, 105, 80, 1])
+                print("Before fit2: " + str(int(round(time.time() * 1000)) - replay_start_t))
                 #states_to_be_predicted = state[1:5].reshape(4, 1, 105, 80)
                 target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted, steps=1)[0])
-            state_f = tf.slice(state, [0, 0, 0, 0], [4, 1, 105, 80])
+                print("Before fit3: " + str(int(round(time.time() * 1000)) - replay_start_t))
+            state_f = tf.slice(state, [0, 0, 0, 0], [4, 105, 80, 1])
+            print("Before fit4: " + str(int(round(time.time() * 1000)) - replay_start_t))
             target_f = self.model.predict(state_f, steps=1)
+            print("Before fit5: " + str(int(round(time.time() * 1000)) - replay_start_t))
             target_f[0][action.eval(session=self.sess)] = target.eval(session=self.sess)    #TODO: Has to be converted to tensor
+            print("Before fit6: " + str(int(round(time.time() * 1000)) - replay_start_t))
+            target_f = tf.constant(target_f, dtype=tf.int8)
+            print("Before fit7: " + str(int(round(time.time() * 1000)) - replay_start_t))
             self.model.fit(state_f, target_f, epochs=1, verbose=0, steps_per_epoch=1)
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
@@ -63,7 +71,7 @@ class DQN():
 
         normalized = keras.layers.Lambda(lambda x: x / 255.0)(input_layer)
 
-        conv_layer_1 = keras.layers.Conv2D(16, 8, 8, activation="relu", data_format="channels_first")(normalized)
+        conv_layer_1 = keras.layers.Conv2D(16, 8, 8, activation="relu", data_format="channels_last")(normalized)
         conv_layer_2 = keras.layers.Conv2D(32, 4, 4, activation="relu")(conv_layer_1)
 
         conv_flattened = keras.layers.Flatten()(conv_layer_2)
@@ -75,6 +83,10 @@ class DQN():
         model = keras.models.Model(inputs=input_layer, outputs=output)
         optimizer = keras.optimizers.RMSprop(lr=self.learning_rate, rho=self.rho, epsilon=self.epsilon)
         model.compile(optimizer, loss='mse')
+
+        writer = tf.summary.FileWriter('.')
+        writer.add_graph(tf.get_default_graph())
+
         return model
 
     def load(self, name):
@@ -106,7 +118,7 @@ def train(episodes):
     env = gym.make('BreakoutDeterministic-v4')
 
     env._max_episode_steps = None
-    state_size = (1,) + preprocess(env.reset()).shape
+    state_size = preprocess(env.reset()).shape + (1,)
     action_size = env.action_space.n
     agent = DQN(state_size, action_size)
 
@@ -133,7 +145,7 @@ def train(episodes):
                     next_state = preprocess(next_state)
                     state.append(next_state)
 
-                    agent.remember(tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
+                    agent.remember(tf.constant(np.array(state).reshape(5, 105, 80, 1), dtype=tf.int8),
                                    action, reward, tf.constant(done, dtype=tf.int8))
                     #agent.queue.enqueue((tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
                     #                     action, reward, tf.constant(done, dtype=tf.int8)))
