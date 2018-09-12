@@ -23,37 +23,29 @@ class DQN():
         self.rho = 0.95
         self.model = self.generate_model()
 
-    def remember(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done))
+    def remember(self, state, action, reward, done):
+        self.memory.append((state, action, reward, done))
 
     def act(self, state):
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
-        state = np.array(state)
-        state = state.reshape(4, 1, 105, 80)
-        act_values = self.model.predict(state)
+        act_values = self.model.predict(np.array(state[:4]).reshape(4, 105, 80, 1))
         return np.argmax(act_values[0])  # returns action
 
     def replay(self, batch_size):
         replay_start_t = int(round(time.time() * 1000))
         replay_fit_sum_t = 0
         minibatch = random.sample(self.memory, batch_size)
-        for state, action, reward, next_state, done in minibatch:
+        for state, action, reward, done in minibatch:
             target = reward
             if not done:
                 states_to_be_predicted = state[1:]
-                states_to_be_predicted.append(next_state)
-                states_to_be_predicted = np.array(states_to_be_predicted)
-                states_to_be_predicted = states_to_be_predicted.reshape(4, 1, 105, 80)
-
-                target = reward + self.gamma * \
-                       np.amax(self.model.predict(states_to_be_predicted)[0])
-            state = np.array(state)
-            state = state.reshape(4, 1, 105, 80)
-            target_f = self.model.predict(state)
+                target = reward + self.gamma * np.amax(self.model.predict(states_to_be_predicted)[0])
+            state_f = state[:4]
+            target_f = self.model.predict(state_f)
             target_f[0][action] = target
             replay_fit_t = int(round(time.time() * 1000))
-            self.model.fit(state, target_f, epochs=1, verbose=0)
+            self.model.fit(state_f, target_f, epochs=1, verbose=0)
             replay_fit_sum_t += int(round(time.time() * 1000)) - replay_fit_t
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
@@ -67,7 +59,7 @@ class DQN():
 
         normalized = keras.layers.Lambda(lambda x: x / 255.0)(input_layer)
 
-        conv_layer_1 = keras.layers.Conv2D(16, 8, 8, activation="relu", data_format="channels_first")(normalized)
+        conv_layer_1 = keras.layers.Conv2D(16, 8, 8, activation="relu", data_format="channels_last")(normalized)
         conv_layer_2 = keras.layers.Conv2D(32, 4, 4, activation="relu")(conv_layer_1)
 
         conv_flattened = keras.layers.Flatten()(conv_layer_2)
@@ -110,7 +102,7 @@ def train(episodes):
     env = gym.make('BreakoutDeterministic-v4')
 
     env._max_episode_steps = None
-    state_size = (1,) + preprocess(env.reset()).shape
+    state_size = preprocess(env.reset()).shape + (1,)
     action_size = env.action_space.n
     agent = DQN(state_size, action_size)
 
@@ -127,21 +119,23 @@ def train(episodes):
             for time_t in range(100000):
 
                 frame_collector = list()
-                reward_collector = list()
+                #reward_collector = list()
                 if time_t == 0:
                     frame_collector.append(state)
                 else:
                     action = agent.act(state)
                     next_state, reward, done, _ = env.step(action)
                     reward = transform_reward(reward)
+                    next_state = preprocess(next_state)
+                    state.append(next_state)
 
-                    agent.remember(state, action, reward, preprocess(next_state), done)
+                    agent.remember(np.array(state).reshape(5, 105, 80, 1), action, reward, done)
 
-                    frame_collector.append(preprocess(next_state))
+                    frame_collector.append(next_state)
                 for frame in range(3):
                     next_state, reward, done, _ = env.step(0)
                     frame_collector.append(preprocess(next_state))
-                    reward_collector.append(transform_reward(reward))
+                    #reward_collector.append(transform_reward(reward))
 
                 state = frame_collector.copy()
 
