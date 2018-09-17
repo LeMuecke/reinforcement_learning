@@ -14,9 +14,9 @@ import h5py
 class DQN():
 
     def __init__(self, state_size, action_size):
-        self.sess_train = tf.Session()
-        self.sess_infer = tf.Session()
-        self.queue = tf.FIFOQueue(capacity=100, dtypes=(tf.int8, tf.int8))
+        self.sess = tf.Session()
+        self.graph = tf.Graph()
+        self.queue = tf.FIFOQueue(capacity=150, dtypes=(tf.float32, tf.float32))
         self.state_size = state_size
         self.action_size = action_size
         self.memory = deque(maxlen=2000)
@@ -52,12 +52,15 @@ class DQN():
                 target = reward
                 if not done:
                     state_tbp = tf.slice(state, [1, 0, 0, 0], [4, 105, 80, 1])
-                    target = reward + self.gamma * np.amax(self.model.predict(state_tbp, steps=1)[0])
+                    target = reward + self.gamma * np.amax(self.sess.run(self.output)[0])
+                    #target = reward + self.gamma * np.amax(self.model.predict(state_tbp)[0])
                 state_f = tf.slice(state, [0, 0, 0, 0], [4, 105, 80, 1])
+                state_f = tf.map_fn(lambda x: x / 255.0, state_f)
+
                 target_f = self.model.predict(state_f, steps=1)
                 target_f[0][action] = target
 
-                return self.queue.enqueue((state_f, tf.constant(target_f, dtype=tf.int8)))
+                return self.queue.enqueue((tf.cast(state_f, tf.float32), tf.constant(target_f, dtype=tf.float32)))
 
 
             number_of_threads = 4
@@ -83,29 +86,46 @@ class DQN():
 
         print("ReplayE:" + str(int(round(time.time() * 1000)) - replay_start_t), flush=True)
 
+    def input_fn(self):
+        state, target = self.queue.dequeue()
+        return state, target
+
     def generate_model(self):
 
         with tf.name_scope('training_part'):
 
-            input_layer = keras.layers.Input(shape=self.state_size, batch_size=4, name='input_frames')
+            input_d, true_d = self.queue.dequeue()
 
-            normalized = keras.layers.Lambda(lambda x: x / 255.0)(input_layer)
+            #input_layer = tf.layers.InputSpec(input_d, dtype=tf.float32, shape=(4,) + self.state_size)
 
-            conv_layer_1 = keras.layers.Conv2D(16, 8, 8, activation="relu", data_format="channels_last")(normalized)
-            conv_layer_2 = keras.layers.Conv2D(32, 4, 4, activation="relu")(conv_layer_1)
+            #normalized = keras.layers.Lambda(lambda x: x / 255.0)(input_layer)
 
-            conv_flattened = keras.layers.Flatten()(conv_layer_2)
+            input_d_reshaped = tf.reshape(input_d, (4, 105, 80, 1))
 
-            hidden = keras.layers.Dense(256, activation="relu")(conv_flattened)
+            conv_layer_1 = tf.layers.Conv2D(16, 8, 8, activation="relu", data_format="channels_last")(input_d_reshaped)
+            conv_layer_2 = tf.layers.Conv2D(32, 4, 4, activation="relu")(conv_layer_1)
 
-            output = keras.layers.Dense(self.action_size)(hidden)
+            conv_flattened = tf.layers.Flatten()(conv_layer_2)
 
-            model = keras.models.Model(inputs=input_layer, outputs=output)
+            hidden = tf.layers.Dense(256, activation="relu")(conv_flattened)
 
-            optimizer = keras.optimizers.RMSprop(lr=self.learning_rate, rho=self.rho, epsilon=self.epsilon)
-        model.compile(optimizer, loss='mse')
+            self.output = tf.layers.Dense(self.action_size)(hidden)
+            output = self.output
 
-        return model
+            #model = tf.models.Model(inputs=input_layer, outputs=output)
+
+            loss = tf.losses.mean_squared_error(labels=true_d, predictions=output)
+            optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate, epsilon=self.epsilon)   #TODO: Epsilon may be wrong
+
+            train_op = optimizer.minimize(loss, name="train_op")
+            a = 1
+
+            #TODO: Create a model that enables to input variables and inference
+
+            init = tf.global_variables_initializer()
+            self.sess.run(init)
+
+        return train_op
 
     def load(self, name):
         self.model.load_weights(name)
