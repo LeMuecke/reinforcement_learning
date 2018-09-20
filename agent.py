@@ -11,12 +11,16 @@ from tensorflow import keras
 import h5py
 
 
-class DQN():
+class DQN:
 
     def __init__(self, state_size, action_size):
         self.sess = tf.Session()
         self.graph = tf.Graph()
-        self.queue = tf.FIFOQueue(capacity=150, dtypes=(tf.float32, tf.float32))
+
+        inference_variable = tf.Variable(np.ones((4, 105, 80, 1)), dtype=tf.int8, name="inference_variable")
+        self.update_operation = inference_variable.assign
+
+        self.queue = tf.FIFOQueue(capacity=150, dtypes=(tf.int8, tf.float32))
         self.state_size = state_size
         self.action_size = action_size
         self.memory = deque(maxlen=2000)
@@ -34,9 +38,12 @@ class DQN():
     def act(self, state):
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
-        #state = tf.slice(state, [0, 0, 0, 0], [4, 105, 80, 1])
+
         state = tf.constant(np.array(state).reshape(4, 105, 80, 1), dtype=tf.int8)
-        act_values = self.model.predict(state, steps=1)
+
+        self.sess.run(self.update_operation(state))
+        act_values = self.sess.run(self.output)
+        #act_values = self.model.predict(state, steps=1)
         return np.argmax(act_values[0])  # returns action
 
     def fill_queue(self):
@@ -52,16 +59,19 @@ class DQN():
                 target = reward
                 if not done:
                     state_tbp = tf.slice(state, [1, 0, 0, 0], [4, 105, 80, 1])
+
+                    self.sess.run(self.update_operation(state_tbp))
+
                     target = reward + self.gamma * np.amax(self.sess.run(self.output)[0])
                     #target = reward + self.gamma * np.amax(self.model.predict(state_tbp)[0])
                 state_f = tf.slice(state, [0, 0, 0, 0], [4, 105, 80, 1])
-                state_f = tf.map_fn(lambda x: x / 255.0, state_f)
 
-                target_f = self.model.predict(state_f, steps=1)
+                self.sess.run(self.update_operation(state_f))
+                target_f = self.sess.run(self.output)
+                #target_f = self.model.predict(state_f, steps=1)
                 target_f[0][action] = target
 
-                return self.queue.enqueue((tf.cast(state_f, tf.float32), tf.constant(target_f, dtype=tf.float32)))
-
+                return self.queue.enqueue((state_f, tf.constant(target_f, dtype=tf.float32)))
 
             number_of_threads = 4
             qr = tf.train.QueueRunner(self.queue, [inner_fill()] * number_of_threads)
@@ -77,9 +87,10 @@ class DQN():
 
         replay_start_t = int(round(time.time() * 1000))
 
-        state_f, target_f = self.queue.dequeue()
+        #state_f, target_f = self.queue.dequeue()
         a = 3
-        self.model.fit(state_f, target_f, epochs=1, verbose=0, steps_per_epoch=1)
+        #self.model.fit(state_f, target_f, epochs=1, verbose=0, steps_per_epoch=1)
+        self.sess.run(self.model)
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
@@ -92,29 +103,42 @@ class DQN():
 
     def generate_model(self):
 
-        with tf.name_scope('training_part'):
+        with tf.variable_scope('training_part', reuse=tf.AUTO_REUSE):
 
-            input_d, true_d = self.queue.dequeue()
+            input_t, true_t = self.queue.dequeue()
+            input_t_cast = tf.cast(input_t, tf.float32)
+            input_t_map = tf.map_fn(lambda x: x / 255.0, input_t_cast)
+            input_t_reshaped = tf.reshape(input_t_map, (4, 105, 80, 1), name="reshape1")
 
-            #input_layer = tf.layers.InputSpec(input_d, dtype=tf.float32, shape=(4,) + self.state_size)
+            conv_layer_1 = tf.layers.conv2d(input_t_reshaped, 16, 8, 8, activation="relu", data_format="channels_last", name="conv2d_1", reuse=None)
+            conv_layer_2 = tf.layers.conv2d(conv_layer_1, 32, 4, 4, activation="relu", name="conv2d_2", reuse=None)
 
-            #normalized = keras.layers.Lambda(lambda x: x / 255.0)(input_layer)
+            conv_flattened = tf.layers.Flatten(name="flatten1")(conv_layer_2)
 
-            input_d_reshaped = tf.reshape(input_d, (4, 105, 80, 1))
+            hidden = tf.layers.dense(conv_flattened, 256, activation="relu", name="hidden1", reuse=None)
 
-            conv_layer_1 = tf.layers.Conv2D(16, 8, 8, activation="relu", data_format="channels_last")(input_d_reshaped)
-            conv_layer_2 = tf.layers.Conv2D(32, 4, 4, activation="relu")(conv_layer_1)
+            output = tf.layers.dense(hidden, self.action_size, name="output1", reuse=None)
 
-            conv_flattened = tf.layers.Flatten()(conv_layer_2)
+            #########################################################################################
 
-            hidden = tf.layers.Dense(256, activation="relu")(conv_flattened)
+            input_i = tf.get_variable(name="inference_variable", shape=(4, 105, 80, 1))
+            input_i_cast = tf.cast(input_i, tf.float32)
+            input_i_map = tf.map_fn(lambda x: x / 255.0, input_i_cast)
+            input_i_reshaped = tf.reshape(input_i_map, (4, 105, 80, 1), name="reshape2")
 
-            self.output = tf.layers.Dense(self.action_size)(hidden)
-            output = self.output
+            conv_layer_3 = tf.layers.conv2d(input_i_reshaped, 16, 8, 8, activation="relu", data_format="channels_last", name="conv2d_1", reuse=True)
+            conv_layer_4 = tf.layers.conv2d(conv_layer_3, 32, 4, 4, activation="relu", name="conv2d_2", reuse=True)
 
-            #model = tf.models.Model(inputs=input_layer, outputs=output)
+            conv_flattened_2 = tf.layers.Flatten(name="flatten1")(conv_layer_4)
 
-            loss = tf.losses.mean_squared_error(labels=true_d, predictions=output)
+            hidden_2 = tf.layers.dense(conv_flattened_2, 256, activation="relu", name="hidden1", reuse=True)
+
+            output_2 = tf.layers.dense(hidden_2, self.action_size, name="output1", reuse=True)
+            self.output = output_2
+
+            #####################################################################################
+
+            loss = tf.losses.mean_squared_error(labels=true_t, predictions=output)
             optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate, epsilon=self.epsilon)   #TODO: Epsilon may be wrong
 
             train_op = optimizer.minimize(loss, name="train_op")
@@ -165,60 +189,58 @@ def train(episodes):
     first_start = True
     coord = tf.train.Coordinator()
 
-    with tf.Session() as sess:
+    #agent.load("./breakoutDeterministicV4.h5")
+    try:
+        for e in range(episodes):
+            episode_start_t = int(round(time.time() * 1000))
+            state = preprocess(env.reset())
+            action = None
 
-        #agent.load("./breakoutDeterministicV4.h5")
-        try:
-            for e in range(episodes):
-                episode_start_t = int(round(time.time() * 1000))
-                state = preprocess(env.reset())
-                action = None
+            for time_t in range(100000):
 
-                for time_t in range(100000):
+                frame_collector = list()
+                #reward_collector = list()
+                if time_t == 0:
+                    frame_collector.append(state)
+                else:
+                    action = agent.act(state)
+                    next_state, reward, done, _ = env.step(action)
+                    reward = transform_reward(reward)
+                    next_state = preprocess(next_state)
+                    state.append(next_state)
 
-                    frame_collector = list()
-                    #reward_collector = list()
-                    if time_t == 0:
-                        frame_collector.append(state)
-                    else:
-                        action = agent.act(state)
-                        next_state, reward, done, _ = env.step(action)
-                        reward = transform_reward(reward)
-                        next_state = preprocess(next_state)
-                        state.append(next_state)
+                    agent.remember(tf.constant(np.array(state).reshape(5, 105, 80, 1), dtype=tf.int8),
+                                   action, reward, done)
+                    #agent.queue.enqueue((tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
+                    #                     action, reward, tf.constant(done, dtype=tf.int8)))
 
-                        agent.remember(tf.constant(np.array(state).reshape(5, 105, 80, 1), dtype=tf.int8),
-                                       action, reward, done)
-                        #agent.queue.enqueue((tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
-                        #                     action, reward, tf.constant(done, dtype=tf.int8)))
+                    frame_collector.append(next_state)
+                for frame in range(3):
+                    next_state, reward, done, _ = env.step(0)   #TODO: Check if 0 is really "not moving anywhere"
+                    frame_collector.append(preprocess(next_state))
+                    #reward_collector.append(transform_reward(reward))
 
-                        frame_collector.append(next_state)
-                    for frame in range(3):
-                        next_state, reward, done, _ = env.step(0)   #TODO: Check if 0 is really "not moving anywhere"
-                        frame_collector.append(preprocess(next_state))
-                        #reward_collector.append(transform_reward(reward))
+                state = frame_collector.copy()
 
-                    state = frame_collector.copy()
+                #env.render()
 
-                    #env.render()
+                if done:
+                    # print the score and break out of the loop
+                    print("episode: {}/{}, score: {}"
+                          .format(e, episodes, time_t))
+                    break
+                if len(agent.memory) > batch_size:
+                    if first_start:
+                        agent.fill_queue()
+                        threads = tf.train.start_queue_runners(coord=coord, sess=agent.sess)
+                        first_start = False
+                    agent.replay(batch_size)
 
-                    if done:
-                        # print the score and break out of the loop
-                        print("episode: {}/{}, score: {}"
-                              .format(e, episodes, time_t))
-                        break
-                    if len(agent.memory) > batch_size:
-                        if first_start:
-                            agent.fill_queue()
-                            threads = tf.train.start_queue_runners(coord=coord, sess=sess)
-                            first_start = False
-                        agent.replay(batch_size)
+            print("Episode took " + str(int(round(time.time() * 1000)) - episode_start_t))
 
-                print("Episode took " + str(int(round(time.time() * 1000)) - episode_start_t))
-
-            agent.save("./breakoutDeterministicV4.h5")
-        except KeyboardInterrupt:
-            agent.save("./breakoutDeterministicV4.h5")
+        agent.save("./breakoutDeterministicV4.h5")
+    except KeyboardInterrupt:
+        agent.save("./breakoutDeterministicV4.h5")
 
 
 train(50000)
