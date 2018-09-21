@@ -87,9 +87,6 @@ class DQN:
 
         replay_start_t = int(round(time.time() * 1000))
 
-        #state_f, target_f = self.queue.dequeue()
-        a = 3
-        #self.model.fit(state_f, target_f, epochs=1, verbose=0, steps_per_epoch=1)
         self.sess.run(self.model)
 
         if self.epsilon > self.epsilon_min:
@@ -195,32 +192,42 @@ def train(episodes):
             episode_start_t = int(round(time.time() * 1000))
             state = preprocess(env.reset())
             action = None
+            recent_states = deque(maxlen=5)
 
             for time_t in range(100000):
 
-                frame_collector = list()
-                #reward_collector = list()
-                if time_t == 0:
-                    frame_collector.append(state)
+                if time_t < 5:
+                    state, reward, done, _ = env.step(0)     # TODO: Make this random or interpolate somehow
+                    state = preprocess(state)
+                    recent_states.append(state)
                 else:
-                    action = agent.act(state)
-                    next_state, reward, done, _ = env.step(action)
+                    action = agent.act(np.array(recent_states)[1:].reshape(4, 105, 80, 1))
+                    state, reward, done, _ = env.step(action)
                     reward = transform_reward(reward)
-                    next_state = preprocess(next_state)
-                    state.append(next_state)
-
-                    agent.remember(tf.constant(np.array(state).reshape(5, 105, 80, 1), dtype=tf.int8),
+                    state = preprocess(state)
+                    recent_states.append(state)
+                    agent.remember(tf.constant(np.array(recent_states).reshape(5, 105, 80, 1), dtype=tf.int8),
                                    action, reward, done)
-                    #agent.queue.enqueue((tf.constant(np.array(state).reshape(5, 1, 105, 80), dtype=tf.int8),
-                    #                     action, reward, tf.constant(done, dtype=tf.int8)))
 
-                    frame_collector.append(next_state)
-                for frame in range(3):
-                    next_state, reward, done, _ = env.step(0)   #TODO: Check if 0 is really "not moving anywhere"
-                    frame_collector.append(preprocess(next_state))
-                    #reward_collector.append(transform_reward(reward))
-
-                state = frame_collector.copy()
+                # frame_collector = list()
+                # if time_t == 0:
+                #     frame_collector.append(state)
+                # else:
+                #     action = agent.act(state)
+                #     next_state, reward, done, _ = env.step(action)
+                #     reward = transform_reward(reward)
+                #     next_state = preprocess(next_state)
+                #     state.append(next_state)
+                #
+                #     agent.remember(tf.constant(np.array(state).reshape(5, 105, 80, 1), dtype=tf.int8),
+                #                    action, reward, done)
+                #
+                #     frame_collector.append(next_state)
+                # for frame in range(3):
+                #     next_state, reward, done, _ = env.step(0)   #TODO: Check if 0 is really "not moving anywhere"
+                #     frame_collector.append(preprocess(next_state))
+                #
+                # state = frame_collector.copy()
 
                 #env.render()
 
