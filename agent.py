@@ -7,8 +7,24 @@ import random
 from random_batch_deque import RandomBatchDeque
 
 import tensorflow as tf
-from tensorflow import keras
+#from tensorflow import keras
 import h5py
+
+
+def to_grayscale(img):
+    return np.mean(img, axis=2).astype(np.uint8)
+
+
+def downsample(img):
+    return img[::2, ::2]
+
+
+def preprocess(img):
+    return to_grayscale(downsample(img))
+
+
+def transform_reward(reward):
+    return np.sign(reward)
 
 
 class DQN:
@@ -154,100 +170,59 @@ class DQN:
     def save(self, name):
         self.model.save_weights(name)
 
-def to_grayscale(img):
-    return np.mean(img, axis=2).astype(np.uint8)
+
+class Game:
+
+    # initialize the game and the needed constants
+    def __init__(self):
+        self.env = gym.make('BreakoutDeterministic-v4')
+        self.env._max_episode_steps = None
+        self.state_size = preprocess(self.env.reset()).shape + (1,)
+        self.action_size = self.env.action_space.n
+        self.recent_states = deque(maxlen=5)
+        self.coord = tf.train.Coordinator()
+        self.first_start = True
+        self.batch_size = 1
+
+        self.agent = DQN(self.state_size, self.action_size)
+
+    #
+    def play_game(self, n_episodes):
+        for e in range(n_episodes):
+            self.env.reset()
+            self.recent_states = deque(maxlen=5)
+
+            self.play_episode(n_episodes)
+
+    def play_episode(self, n_max_frames, e, n_episodes):
+        for time_t in range(n_max_frames):
+            if time_t < 5:
+                state, reward, done, _ = self.env.step(0)  # TODO: Make this random or interpolate somehow
+                state = preprocess(state)
+                self.recent_states.append(state)
+            else:
+                action = self.agent.act(np.array(self.recent_states)[1:].reshape(4, 105, 80, 1))
+                state, reward, done, _ = self.env.step(action)
+                reward = transform_reward(reward)
+                state = preprocess(state)
+                self.recent_states.append(state)
+                self.agent.remember(tf.constant(np.array(self.recent_states).reshape(5, 105, 80, 1), dtype=tf.int8),
+                                    action, reward, done)
+
+            self.env.render()
+
+            if done:
+                # print the score and break out of the loop
+                print("episode: {}/{}, score: {}"
+                      .format(e, n_episodes, time_t))
+                break
+            if len(self.agent.memory) > self.batch_size:
+                if self.first_start:
+                    self.agent.fill_queue()
+                    threads = tf.train.start_queue_runners(coord=self.coord, sess=self.agent.sess)
+                    self.first_start = False
+                self.agent.replay(self.batch_size)
 
 
-def downsample(img):
-    return img[::2, ::2]
-
-
-def preprocess(img):
-    return to_grayscale(downsample(img))
-
-
-def transform_reward(reward):
-    return np.sign(reward)
-
-
-def train(episodes):
-    #env = gym.make('CartPole-v0')
-    #env = gym.make('Breakout-v0')
-    #env = gym.make('BeamRider-v0')
-    env = gym.make('BreakoutDeterministic-v4')
-
-    env._max_episode_steps = None
-    state_size = preprocess(env.reset()).shape + (1,)
-    action_size = env.action_space.n
-    agent = DQN(state_size, action_size)
-
-    done = False
-    batch_size = 32
-    first_start = True
-    coord = tf.train.Coordinator()
-
-    #agent.load("./breakoutDeterministicV4.h5")
-    try:
-        for e in range(episodes):
-            episode_start_t = int(round(time.time() * 1000))
-            state = preprocess(env.reset())
-            action = None
-            recent_states = deque(maxlen=5)
-
-            for time_t in range(100000):
-
-                if time_t < 5:
-                    state, reward, done, _ = env.step(0)     # TODO: Make this random or interpolate somehow
-                    state = preprocess(state)
-                    recent_states.append(state)
-                else:
-                    action = agent.act(np.array(recent_states)[1:].reshape(4, 105, 80, 1))
-                    state, reward, done, _ = env.step(action)
-                    reward = transform_reward(reward)
-                    state = preprocess(state)
-                    recent_states.append(state)
-                    agent.remember(tf.constant(np.array(recent_states).reshape(5, 105, 80, 1), dtype=tf.int8),
-                                   action, reward, done)
-
-                # frame_collector = list()
-                # if time_t == 0:
-                #     frame_collector.append(state)
-                # else:
-                #     action = agent.act(state)
-                #     next_state, reward, done, _ = env.step(action)
-                #     reward = transform_reward(reward)
-                #     next_state = preprocess(next_state)
-                #     state.append(next_state)
-                #
-                #     agent.remember(tf.constant(np.array(state).reshape(5, 105, 80, 1), dtype=tf.int8),
-                #                    action, reward, done)
-                #
-                #     frame_collector.append(next_state)
-                # for frame in range(3):
-                #     next_state, reward, done, _ = env.step(0)   #TODO: Check if 0 is really "not moving anywhere"
-                #     frame_collector.append(preprocess(next_state))
-                #
-                # state = frame_collector.copy()
-
-                #env.render()
-
-                if done:
-                    # print the score and break out of the loop
-                    print("episode: {}/{}, score: {}"
-                          .format(e, episodes, time_t))
-                    break
-                if len(agent.memory) > batch_size:
-                    if first_start:
-                        agent.fill_queue()
-                        threads = tf.train.start_queue_runners(coord=coord, sess=agent.sess)
-                        first_start = False
-                    agent.replay(batch_size)
-
-            print("Episode took " + str(int(round(time.time() * 1000)) - episode_start_t))
-
-        agent.save("./breakoutDeterministicV4.h5")
-    except KeyboardInterrupt:
-        agent.save("./breakoutDeterministicV4.h5")
-
-
-train(50000)
+game = Game()
+game.play_game(500)
