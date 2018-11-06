@@ -1,13 +1,11 @@
 from collections import deque
 
-import gym
 import numpy as np
 import time
 import random
-from random_batch_deque import RandomBatchDeque
+from multiprocessing.dummy import Pool as ThreadPool
 
 import tensorflow as tf
-#from tensorflow import keras
 import h5py
 
 
@@ -29,9 +27,10 @@ def transform_reward(reward):
 
 class DQN:
 
-    def __init__(self, state_size, action_size):
+    def __init__(self, dqn_game, state_size, action_size):
         self.sess = tf.Session()
         self.graph = tf.Graph()
+        self.dqn_game = dqn_game
 
         inference_variable = tf.Variable(np.ones((4, 105, 80, 1)), dtype=tf.int8, name="inference_variable")
         self.update_operation = inference_variable.assign
@@ -97,9 +96,9 @@ class DQN:
 
     def replay(self, batch_size):
 
-        merged = tf.summary.merge_all()
-        writer = tf.summary.FileWriter('.')
-        writer.add_graph(tf.get_default_graph())
+        #merged = tf.summary.merge_all()
+        #writer = tf.summary.FileWriter('.')
+        #writer.add_graph(tf.get_default_graph())
 
         replay_start_t = int(round(time.time() * 1000))
 
@@ -171,58 +170,3 @@ class DQN:
         self.model.save_weights(name)
 
 
-class Game:
-
-    # initialize the game and the needed constants
-    def __init__(self):
-        self.env = gym.make('BreakoutDeterministic-v4')
-        self.env._max_episode_steps = None
-        self.state_size = preprocess(self.env.reset()).shape + (1,)
-        self.action_size = self.env.action_space.n
-        self.recent_states = deque(maxlen=5)
-        self.coord = tf.train.Coordinator()
-        self.first_start = True
-        self.batch_size = 1
-
-        self.agent = DQN(self.state_size, self.action_size)
-
-    #
-    def play_game(self, n_episodes):
-        for e in range(n_episodes):
-            self.env.reset()
-            self.recent_states = deque(maxlen=5)
-
-            self.play_episode(n_episodes)
-
-    def play_episode(self, n_max_frames, e, n_episodes):
-        for time_t in range(n_max_frames):
-            if time_t < 5:
-                state, reward, done, _ = self.env.step(0)  # TODO: Make this random or interpolate somehow
-                state = preprocess(state)
-                self.recent_states.append(state)
-            else:
-                action = self.agent.act(np.array(self.recent_states)[1:].reshape(4, 105, 80, 1))
-                state, reward, done, _ = self.env.step(action)
-                reward = transform_reward(reward)
-                state = preprocess(state)
-                self.recent_states.append(state)
-                self.agent.remember(tf.constant(np.array(self.recent_states).reshape(5, 105, 80, 1), dtype=tf.int8),
-                                    action, reward, done)
-
-            self.env.render()
-
-            if done:
-                # print the score and break out of the loop
-                print("episode: {}/{}, score: {}"
-                      .format(e, n_episodes, time_t))
-                break
-            if len(self.agent.memory) > self.batch_size:
-                if self.first_start:
-                    self.agent.fill_queue()
-                    threads = tf.train.start_queue_runners(coord=self.coord, sess=self.agent.sess)
-                    self.first_start = False
-                self.agent.replay(self.batch_size)
-
-
-game = Game()
-game.play_game(500)
